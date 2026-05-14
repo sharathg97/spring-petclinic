@@ -8,7 +8,7 @@ environment {
         IMAGE_NAME = "petclinic-app"
         IMAGE_TAG = "${BUILD_NUMBER}"
 
-        JFROG_REGISTRY = "52.229.154.181:8082/artifactory/docker-local/"
+        JFROG_REGISTRY = "52.229.154.181:8082/artifactory/docker-local"
 
         AKS_NAMESPACE = "petclinic"
 
