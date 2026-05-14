@@ -127,10 +127,6 @@ environment {
 
         }
 
-        always {
-
-            sh 'docker system prune -f'
-
-        }
+        
     }
 }
