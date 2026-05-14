@@ -8,7 +8,7 @@ environment {
         IMAGE_NAME = "petclinic-app"
         IMAGE_TAG = "${BUILD_NUMBER}"
 
-        JFROG_REGISTRY = "52.229.154.181:8082/artifactory/docker-local"
+        JFROG_REGISTRY = "52.229.154.181:8082/docker-local"
 
         AKS_NAMESPACE = "petclinic"
 
@@ -70,11 +70,11 @@ environment {
                     )
                 ]) {
 
-                    sh """
-                        docker login 52.229.154.181:8082 \
-                        -u $JFROG_USER \
-                        -p $JFROG_PASS
-                    """
+                    sh '''
+                        echo "$JFROG_PASS" | docker login 52.229.154.181:8082 \
+                        -u "$JFROG_USER" \
+                        --password-stdin
+                    '''
                 }
             }
         }
