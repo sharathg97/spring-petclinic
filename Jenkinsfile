@@ -71,7 +71,7 @@ environment {
                 ]) {
 
                     sh """
-                        docker login $JFROG_REGISTRY \
+                        docker login 52.229.154.181:8082 \
                         -u $JFROG_USER \
                         -p $JFROG_PASS
                     """
