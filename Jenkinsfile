@@ -24,6 +24,17 @@ environment {
             }
         }
 
+       stage('Maven Build ') {
+
+            steps {
+
+                sh """
+                    mvn clean install -DskipTests
+                """
+
+            }
+        }
+
         stage('Build Docker Image') {
 
             steps {
