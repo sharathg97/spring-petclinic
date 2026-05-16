@@ -6,7 +6,7 @@ pipeline {
     environment {
         APP_NAME = "spring-petclinic"
 
-        // JFrog Artifactory
+        //noinspection HttpUrlsUsage
         JFROG_URL = "http://52.229.154.181:8082/artifactory"
         JFROG_REPO = "jfrog-springpetclinic"
 
