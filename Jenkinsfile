@@ -1,65 +1,67 @@
 pipeline {
-
     agent {
         label 'docker-agent'
     }
-environment {
 
+    environment {
+        APP_NAME = "spring-petclinic"
+
+        // JFrog Artifactory
+        JFROG_URL = "http://52.229.154.181:8082/artifactory"
+        JFROG_REPO = "jfrog-springpetclinic"
+
+        // Jar details
+        JAR_FILE = "target/spring-petclinic-4.0.0-SNAPSHOT.jar"
+        ARTIFACT_PATH = "com/petclinic/${BUILD_NUMBER}/spring-petclinic.jar"
+
+        // AKS
+        AKS_NAMESPACE = "petclinic"
+
+        // Docker image
         IMAGE_NAME = "petclinic-app"
         IMAGE_TAG = "${BUILD_NUMBER}"
 
-        JFROG_REGISTRY = "52.229.154.181:8082/docker-local"
+        // Azure Credentials
+        AZURE_CLIENT_ID     = credentials('azure-client-id')
+        AZURE_CLIENT_SECRET = credentials('azure-client-secret')
+        AZURE_TENANT_ID     = credentials('azure-tenant-id')
+        AZURE_SUBSCRIPTION  = credentials('azure-subscription-id')
 
-        AKS_NAMESPACE = "petclinic"
-
+        // Azure Container Registry
+        ACR_NAME = "sharacrcontreg"
     }
-   stages {
 
+    stages {
+
+        // ---------------- CHECKOUT ----------------
         stage('Checkout Code') {
-
             steps {
-
-                git branch:'main',url:'https://github.com/sharathg97/spring-petclinic.git'
-
+                git branch: 'main',
+                url: 'https://github.com/sharathg97/spring-petclinic.git'
             }
         }
 
-       stage('Maven Build ') {
-
+        // ---------------- MAVEN BUILD ----------------
+        stage('Maven Build') {
             steps {
-
-                sh """
-                    mvn clean install -DskipTests
-                """
-
+                sh '''
+                    mvn clean package -DskipTests
+                '''
             }
         }
 
-        stage('Build Docker Image') {
-
+        // ---------------- VERIFY ARTIFACT ----------------
+        stage('Verify Artifact') {
             steps {
-
-                sh """
-                    docker build -t $IMAGE_NAME:$IMAGE_TAG .
-                """
-
+                sh '''
+                    echo "Checking generated artifact..."
+                    ls -lh target/
+                '''
             }
         }
 
-        stage('Tag Docker Image') {
-
-            steps {
-
-                sh """
-                    docker tag $IMAGE_NAME:$IMAGE_TAG \
-                    $JFROG_REGISTRY/$IMAGE_NAME:$IMAGE_TAG
-                """
-
-            }
-        }
-
-        stage('Login to JFrog') {
-
+        // ---------------- UPLOAD JAR TO JFROG ----------------
+        stage('Upload JAR to JFrog Artifactory') {
             steps {
 
                 withCredentials([
@@ -71,28 +73,64 @@ environment {
                 ]) {
 
                     sh '''
-                        echo "$JFROG_PASS" | docker login 52.229.154.181:8082 \
-                        -u "$JFROG_USER" \
-                        --password-stdin
+                        echo "Uploading JAR to JFrog..."
+
+                        curl -u $JFROG_USER:$JFROG_PASS \
+                        -T $JAR_FILE \
+                        "$JFROG_URL/$JFROG_REPO/$ARTIFACT_PATH"
                     '''
                 }
             }
         }
 
-        stage('Push Image to JFrog') {
-
+        // ---------------- AZURE LOGIN ----------------
+        stage('ACR Login') {
             steps {
 
-                sh """
-                    docker push \
-                    $JFROG_REGISTRY/$IMAGE_NAME:$IMAGE_TAG
-                """
+                sh '''
+                    echo "Logging into Azure..."
 
+                    az login --service-principal \
+                      -u $AZURE_CLIENT_ID \
+                      -p $AZURE_CLIENT_SECRET \
+                      --tenant $AZURE_TENANT_ID
+
+                    az account set --subscription $AZURE_SUBSCRIPTION
+
+                    echo "Logging into Azure Container Registry..."
+
+                    az acr login --name $ACR_NAME
+                '''
             }
         }
 
-        stage('Deploy to AKS') {
+        // ---------------- BUILD DOCKER IMAGE ----------------
+        stage('Docker Build') {
+            steps {
 
+                sh '''
+                    echo "Building Docker image..."
+
+                    docker build --no-cache \
+                      -t $ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG .
+                '''
+            }
+        }
+
+        // ---------------- PUSH IMAGE ----------------
+        stage('Push Image') {
+            steps {
+
+                sh '''
+                    echo "Pushing Docker image..."
+
+                    docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
+
+        // ---------------- DEPLOY TO AKS ----------------
+        stage('Deploy to AKS') {
             steps {
 
                 withCredentials([
@@ -102,42 +140,91 @@ environment {
                     )
                 ]) {
 
-                    sh """
-                        kubectl set image deployment/petclinic \
-                        petclinic=$JFROG_REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
-                        -n $AKS_NAMESPACE
-                    """
+                    sh '''
+                        echo "Injecting image tag into deployment file..."
 
+                        sed "s|IMAGE_TAG|$IMAGE_TAG|g" \
+                        k8s/dev/deployment.yaml > k8s/dev/deployment-temp.yaml
+
+                        echo "Final Deployment Manifest:"
+                        cat k8s/dev/deployment-temp.yaml
+
+                        echo "Deploying application to AKS..."
+
+                        kubectl apply -f k8s/dev/deployment-temp.yaml
+
+                        kubectl apply -f k8s/dev/service.yaml
+
+                        echo "Waiting for deployment rollout..."
+
+                        kubectl rollout status \
+                        deployment/spring-petclinic-app \
+                        --timeout=5m || true
+
+                        echo "Pods Status:"
+                        kubectl get pods -n $AKS_NAMESPACE -o wide
+
+                        echo "Services Status:"
+                        kubectl get svc -n $AKS_NAMESPACE
+                    '''
                 }
-            }
-        }
-
-        stage('Verify Deployment') {
-
-            steps {
-
-                sh """
-                    kubectl rollout status deployment/petclinic
-                """
-
             }
         }
     }
 
     post {
 
-        success {
+    success {
+        echo 'Pipeline executed successfully.'
 
-            echo 'Pipeline executed successfully.'
+        mail to: 'sharathgwork@gmail.com',
+             subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+             body: """
+Hello Team,
 
-        }
+The Jenkins pipeline completed successfully.
 
-        failure {
+Job Name   : ${env.JOB_NAME}
+Build Number : ${env.BUILD_NUMBER}
+Build URL  : ${env.BUILD_URL}
 
-            echo 'Pipeline failed.'
+Status     : SUCCESS
 
-        }
-
-        
+Regards,
+Jenkins
+"""
     }
+
+    failure {
+        echo 'Pipeline execution failed.'
+
+        mail to: 'sharathgwork@gmail.com',
+             subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+             body: """
+Hello Team,
+
+The Jenkins pipeline execution failed.
+
+Job Name   : ${env.JOB_NAME}
+Build Number : ${env.BUILD_NUMBER}
+Build URL  : ${env.BUILD_URL}
+
+Status     : FAILED
+
+Please check the console logs.
+
+Regards,
+Jenkins
+"""
+    }
+
+    always {
+
+        sh '''
+            echo "Cleaning workspace..."
+
+            rm -rf target/*.jar || true
+        '''
+    }
+}
 }
