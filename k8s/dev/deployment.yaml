@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: spring-container
-          image: sharacr1234567.azurecr.io/pet_clinic:IMAGE_TAG
+          image: petclinic-app:IMAGE_TAG
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
